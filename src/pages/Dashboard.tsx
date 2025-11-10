@@ -2,9 +2,12 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Trophy, LogOut, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import MatchCard from "@/components/MatchCard";
+import MyBets from "@/components/MyBets";
+import Standings from "@/components/Standings";
 
 // Times do Brasileirão Série A 2025
 const teams = [
@@ -52,7 +55,8 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState<any>(null);
   const [matches, setMatches] = useState<any[]>([]);
-  const [balance, setBalance] = useState(1000); // Saldo inicial simulado
+  const [balance, setBalance] = useState(1000);
+  const [bets, setBets] = useState<any[]>([]); // Armazenar apostas
 
   useEffect(() => {
     // Verificar se usuário está logado
@@ -63,6 +67,12 @@ const Dashboard = () => {
     }
     setUser(JSON.parse(userData));
     setMatches(generateMatches());
+    
+    // Carregar apostas do localStorage
+    const savedBets = localStorage.getItem("borabet_bets");
+    if (savedBets) {
+      setBets(JSON.parse(savedBets));
+    }
   }, [navigate]);
 
   const handleLogout = () => {
@@ -77,9 +87,36 @@ const Dashboard = () => {
       return;
     }
 
+    const match = matches.find(m => m.id === matchId);
+    if (!match) return;
+
+    const potentialWin = parseFloat((amount * parseFloat(odds)).toFixed(2));
+    
+    // Determinar o nome da aposta
+    let betTypeName = "";
+    if (betType === "home") betTypeName = match.homeTeam.name;
+    else if (betType === "away") betTypeName = match.awayTeam.name;
+    else betTypeName = "Empate";
+
+    const newBet = {
+      id: Date.now(),
+      match: `${match.homeTeam.name} vs ${match.awayTeam.name}`,
+      betType: betTypeName,
+      odds: odds,
+      amount: amount,
+      potentialWin: potentialWin,
+      date: match.date,
+      status: "pending"
+    };
+
+    const updatedBets = [newBet, ...bets];
+    setBets(updatedBets);
     setBalance(balance - amount);
-    const potentialWin = (amount * parseFloat(odds)).toFixed(2);
-    toast.success(`Aposta realizada! Retorno potencial: R$ ${potentialWin}`);
+    
+    // Salvar no localStorage
+    localStorage.setItem("borabet_bets", JSON.stringify(updatedBets));
+    
+    toast.success(`Aposta realizada! Retorno potencial: R$ ${potentialWin.toFixed(2)}`);
   };
 
   if (!user) return null;
@@ -122,23 +159,41 @@ const Dashboard = () => {
 
       {/* Main Content */}
       <main className="container mx-auto px-4 py-8">
-        <div className="mb-8">
-          <h2 className="text-3xl font-bold mb-2">Brasileirão Série A 2025</h2>
-          <p className="text-muted-foreground">
-            Aposte nos melhores jogos do campeonato brasileiro
-          </p>
-        </div>
+        <Tabs defaultValue="matches" className="w-full">
+          <TabsList className="grid w-full grid-cols-3 max-w-md mb-8">
+            <TabsTrigger value="matches">Partidas</TabsTrigger>
+            <TabsTrigger value="bets">Minhas Apostas</TabsTrigger>
+            <TabsTrigger value="standings">Classificação</TabsTrigger>
+          </TabsList>
 
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-2">
-          {matches.map((match) => (
-            <MatchCard
-              key={match.id}
-              match={match}
-              onBet={handleBet}
-              userBalance={balance}
-            />
-          ))}
-        </div>
+          <TabsContent value="matches" className="space-y-6">
+            <div className="mb-8">
+              <h2 className="text-3xl font-bold mb-2">Brasileirão Série A 2025</h2>
+              <p className="text-muted-foreground">
+                Aposte nos melhores jogos do campeonato brasileiro
+              </p>
+            </div>
+
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-2">
+              {matches.map((match) => (
+                <MatchCard
+                  key={match.id}
+                  match={match}
+                  onBet={handleBet}
+                  userBalance={balance}
+                />
+              ))}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="bets">
+            <MyBets bets={bets} />
+          </TabsContent>
+
+          <TabsContent value="standings">
+            <Standings />
+          </TabsContent>
+        </Tabs>
       </main>
     </div>
   );
