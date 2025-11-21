@@ -8,118 +8,90 @@ import { toast } from "sonner";
 import MatchCard from "@/components/MatchCard";
 import MyBets from "@/components/MyBets";
 import Standings from "@/components/Standings";
-
-// Times do Brasileirão Série A 2025
-const teams = [
-  { id: 1, name: "Botafogo", logo: "⚫⚪" },
-  { id: 2, name: "Palmeiras", logo: "🟢⚪" },
-  { id: 3, name: "Fortaleza", logo: "🔴🔵" },
-  { id: 4, name: "Internacional", logo: "🔴⚪" },
-  { id: 5, name: "Flamengo", logo: "🔴⚫" },
-  { id: 6, name: "São Paulo", logo: "🔴⚫" },
-  { id: 7, name: "Cruzeiro", logo: "🔵⚪" },
-  { id: 8, name: "Bahia", logo: "🔵🔴" },
-  { id: 9, name: "Corinthians", logo: "⚫⚪" },
-  { id: 10, name: "Vitória", logo: "🔴⚫" },
-  { id: 11, name: "Vasco", logo: "⚫⚪" },
-  { id: 12, name: "Juventude", logo: "🟢⚪" },
-  { id: 13, name: "Grêmio", logo: "🔵⚫" },
-  { id: 14, name: "Fluminense", logo: "🟢🔴" },
-  { id: 15, name: "Atlético-MG", logo: "⚫⚪" },
-  { id: 16, name: "RB Bragantino", logo: "⚪🔴" },
-];
-
-// Gerar partidas aleatórias
-const generateMatches = () => {
-  const matches = [];
-  const shuffled = [...teams].sort(() => Math.random() - 0.5);
-  
-  for (let i = 0; i < shuffled.length; i += 2) {
-    if (i + 1 < shuffled.length) {
-      matches.push({
-        id: matches.length + 1,
-        homeTeam: shuffled[i],
-        awayTeam: shuffled[i + 1],
-        homeOdds: (1.5 + Math.random() * 2).toFixed(2),
-        drawOdds: (2.5 + Math.random() * 1.5).toFixed(2),
-        awayOdds: (1.5 + Math.random() * 2).toFixed(2),
-        date: new Date(Date.now() + Math.random() * 7 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR'),
-      });
-    }
-  }
-  
-  return matches;
-};
+import { betsService, Match } from "@/lib/api";
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState<any>(null);
-  const [matches, setMatches] = useState<any[]>([]);
+  const [matches, setMatches] = useState<Match[]>([]);
   const [balance, setBalance] = useState(1000);
-  const [bets, setBets] = useState<any[]>([]); // Armazenar apostas
+  const [bets, setBets] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Verificar se usuário está logado
-    const userData = localStorage.getItem("borabet_user");
-    if (!userData) {
-      navigate("/auth");
-      return;
-    }
-    setUser(JSON.parse(userData));
-    setMatches(generateMatches());
-    
-    // Carregar apostas do localStorage
-    const savedBets = localStorage.getItem("borabet_bets");
-    if (savedBets) {
-      setBets(JSON.parse(savedBets));
-    }
+    const initDashboard = async () => {
+      // Verificar se usuário está logado
+      const userData = localStorage.getItem("borabet_user");
+      if (!userData) {
+        navigate("/auth");
+        return;
+      }
+      setUser(JSON.parse(userData));
+
+      try {
+        // Buscar partidas do backend
+        const matchesData = await betsService.listMatches();
+        setMatches(matchesData);
+
+        // Buscar apostas do usuário
+        const betsData = await betsService.listBets();
+        setBets(betsData);
+      } catch (error) {
+        toast.error("Erro ao carregar dados");
+        console.error(error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initDashboard();
   }, [navigate]);
 
   const handleLogout = () => {
     localStorage.removeItem("borabet_user");
+    localStorage.removeItem("borabet_token");
     toast.success("Logout realizado com sucesso!");
     navigate("/auth");
   };
 
-  const handleBet = (matchId: number, betType: string, odds: string, amount: number) => {
-    if (amount > balance) {
+  const handleBet = async (matchId: number, marketId: number, selectionCode: string, odds: number, stake: number) => {
+    if (stake > balance) {
       toast.error("Saldo insuficiente!");
       return;
     }
 
-    const match = matches.find(m => m.id === matchId);
-    if (!match) return;
+    try {
+      const betResponse = await betsService.createBet({
+        matchId,
+        marketId,
+        selectionCode,
+        odds,
+        stake,
+      });
 
-    const potentialWin = parseFloat((amount * parseFloat(odds)).toFixed(2));
-    
-    // Determinar o nome da aposta
-    let betTypeName = "";
-    if (betType === "home") betTypeName = match.homeTeam.name;
-    else if (betType === "away") betTypeName = match.awayTeam.name;
-    else betTypeName = "Empate";
-
-    const newBet = {
-      id: Date.now(),
-      match: `${match.homeTeam.name} vs ${match.awayTeam.name}`,
-      betType: betTypeName,
-      odds: odds,
-      amount: amount,
-      potentialWin: potentialWin,
-      date: match.date,
-      status: "pending"
-    };
-
-    const updatedBets = [newBet, ...bets];
-    setBets(updatedBets);
-    setBalance(balance - amount);
-    
-    // Salvar no localStorage
-    localStorage.setItem("borabet_bets", JSON.stringify(updatedBets));
-    
-    toast.success(`Aposta realizada! Retorno potencial: R$ ${potentialWin.toFixed(2)}`);
+      // Atualizar lista de apostas
+      const updatedBets = await betsService.listBets();
+      setBets(updatedBets);
+      
+      // Atualizar saldo
+      setBalance(balance - stake);
+      
+      toast.success(`Aposta realizada! Retorno potencial: R$ ${betResponse.potentialReturn.toFixed(2)}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao criar aposta");
+    }
   };
 
-  if (!user) return null;
+  if (!user || loading) {
+    return (
+      <div className="min-h-screen bg-gradient-dark flex items-center justify-center">
+        <div className="text-center">
+          <Trophy className="h-12 w-12 text-primary mx-auto mb-4 animate-pulse" />
+          <p className="text-muted-foreground">Carregando...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-dark">

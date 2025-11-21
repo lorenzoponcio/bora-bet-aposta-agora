@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Trophy } from "lucide-react";
 import { toast } from "sonner";
+import { authService } from "@/lib/api";
 
 const Auth = () => {
   const navigate = useNavigate();
@@ -18,13 +19,22 @@ const Auth = () => {
     e.preventDefault();
     setIsLoading(true);
     
-    // Simulação de login - substituir quando Lovable Cloud estiver ativo
-    setTimeout(() => {
+    try {
+      const response = await authService.login({
+        email: loginData.email,
+        password: loginData.password,
+      });
+      
+      localStorage.setItem("borabet_token", response.accessToken);
       localStorage.setItem("borabet_user", JSON.stringify({ email: loginData.email }));
+      
       toast.success("Login realizado com sucesso!");
       navigate("/dashboard");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao fazer login");
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   const handleSignup = async (e: React.FormEvent) => {
@@ -42,13 +52,28 @@ const Auth = () => {
 
     setIsLoading(true);
     
-    // Simulação de cadastro - substituir quando Lovable Cloud estiver ativo
-    setTimeout(() => {
+    try {
+      await authService.register({
+        email: signupData.email,
+        password: signupData.password,
+      });
+      
+      // Após cadastro, faz login automaticamente
+      const response = await authService.login({
+        email: signupData.email,
+        password: signupData.password,
+      });
+      
+      localStorage.setItem("borabet_token", response.accessToken);
       localStorage.setItem("borabet_user", JSON.stringify({ email: signupData.email }));
+      
       toast.success("Cadastro realizado com sucesso!");
       navigate("/dashboard");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao criar conta");
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   return (

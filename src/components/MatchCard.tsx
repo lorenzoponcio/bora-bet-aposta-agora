@@ -1,34 +1,37 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Calendar } from "lucide-react";
-
-interface Team {
-  id: number;
-  name: string;
-  logo: string;
-}
-
-interface Match {
-  id: number;
-  homeTeam: Team;
-  awayTeam: Team;
-  homeOdds: string;
-  drawOdds: string;
-  awayOdds: string;
-  date: string;
-}
+import { betsService, Match, Market } from "@/lib/api";
+import { toast } from "sonner";
 
 interface MatchCardProps {
   match: Match;
-  onBet: (matchId: number, betType: string, odds: string, amount: number) => void;
+  onBet: (matchId: number, marketId: number, selectionCode: string, odds: number, stake: number) => void;
   userBalance: number;
 }
 
 const MatchCard = ({ match, onBet, userBalance }: MatchCardProps) => {
   const [selectedBet, setSelectedBet] = useState<string | null>(null);
   const [betAmount, setBetAmount] = useState("");
+  const [markets, setMarkets] = useState<Market[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadMarkets = async () => {
+      try {
+        const marketsData = await betsService.listMarkets(match.id);
+        setMarkets(marketsData);
+      } catch (error) {
+        toast.error("Erro ao carregar odds");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadMarkets();
+  }, [match.id]);
 
   const handleBetClick = (betType: string) => {
     setSelectedBet(betType);
@@ -41,44 +44,80 @@ const MatchCard = ({ match, onBet, userBalance }: MatchCardProps) => {
       return;
     }
 
-    let odds = "0";
-    if (selectedBet === "home") odds = match.homeOdds;
-    if (selectedBet === "draw") odds = match.drawOdds;
-    if (selectedBet === "away") odds = match.awayOdds;
+    // Encontrar o market correto (assumindo que o primeiro market é o principal)
+    const market = markets[0];
+    if (!market) return;
 
-    onBet(match.id, selectedBet!, odds, amount);
+    // Encontrar a seleção correspondente
+    const selection = market.selections.find(s => s.code === selectedBet);
+    if (!selection) return;
+
+    onBet(match.id, market.id, selectedBet!, selection.odds, amount);
     setSelectedBet(null);
     setBetAmount("");
   };
 
   const getOddsForBet = () => {
-    if (selectedBet === "home") return match.homeOdds;
-    if (selectedBet === "draw") return match.drawOdds;
-    if (selectedBet === "away") return match.awayOdds;
-    return "0";
+    const market = markets[0];
+    if (!market) return 0;
+
+    const selection = market.selections.find(s => s.code === selectedBet);
+    return selection?.odds || 0;
   };
 
   const getBetLabel = () => {
-    if (selectedBet === "home") return match.homeTeam.name;
-    if (selectedBet === "draw") return "Empate";
-    if (selectedBet === "away") return match.awayTeam.name;
+    if (selectedBet === "HOME") return match.homeTeam;
+    if (selectedBet === "DRAW") return "Empate";
+    if (selectedBet === "AWAY") return match.awayTeam;
     return "";
   };
+
+  const getOdds = (code: string) => {
+    const market = markets[0];
+    if (!market) return "-.--";
+    
+    const selection = market.selections.find(s => s.code === code);
+    return selection?.odds.toFixed(2) || "-.--";
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  if (loading) {
+    return (
+      <Card className="p-6 bg-card border-border shadow-card animate-pulse">
+        <div className="h-40 bg-muted rounded"></div>
+      </Card>
+    );
+  }
 
   return (
     <Card className="p-6 bg-card border-border shadow-card hover:shadow-glow transition-smooth">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Calendar className="h-4 w-4" />
-          <span>{match.date}</span>
+          <span>{formatDate(match.startsAt)}</span>
         </div>
+        <span className={`text-xs px-2 py-1 rounded ${
+          match.status === 'SCHEDULED' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
+        }`}>
+          {match.status}
+        </span>
       </div>
 
       {/* Teams */}
       <div className="grid grid-cols-3 gap-4 mb-6">
         <div className="text-center">
-          <div className="text-4xl mb-2">{match.homeTeam.logo}</div>
-          <div className="font-semibold text-sm">{match.homeTeam.name}</div>
+          <div className="text-4xl mb-2">⚽</div>
+          <div className="font-semibold text-sm">{match.homeTeam}</div>
         </div>
         
         <div className="flex items-center justify-center">
@@ -86,39 +125,39 @@ const MatchCard = ({ match, onBet, userBalance }: MatchCardProps) => {
         </div>
         
         <div className="text-center">
-          <div className="text-4xl mb-2">{match.awayTeam.logo}</div>
-          <div className="font-semibold text-sm">{match.awayTeam.name}</div>
+          <div className="text-4xl mb-2">⚽</div>
+          <div className="font-semibold text-sm">{match.awayTeam}</div>
         </div>
       </div>
 
       {/* Odds Buttons */}
-      {!selectedBet && (
+      {!selectedBet && markets.length > 0 && (
         <div className="grid grid-cols-3 gap-2">
           <Button
-            onClick={() => handleBetClick("home")}
+            onClick={() => handleBetClick("HOME")}
             className="flex flex-col py-6 bg-muted hover:bg-primary hover:text-primary-foreground transition-smooth"
             variant="outline"
           >
             <span className="text-xs mb-1">Casa</span>
-            <span className="text-lg font-bold">{match.homeOdds}</span>
+            <span className="text-lg font-bold">{getOdds("HOME")}</span>
           </Button>
           
           <Button
-            onClick={() => handleBetClick("draw")}
+            onClick={() => handleBetClick("DRAW")}
             className="flex flex-col py-6 bg-muted hover:bg-primary hover:text-primary-foreground transition-smooth"
             variant="outline"
           >
             <span className="text-xs mb-1">Empate</span>
-            <span className="text-lg font-bold">{match.drawOdds}</span>
+            <span className="text-lg font-bold">{getOdds("DRAW")}</span>
           </Button>
           
           <Button
-            onClick={() => handleBetClick("away")}
+            onClick={() => handleBetClick("AWAY")}
             className="flex flex-col py-6 bg-muted hover:bg-primary hover:text-primary-foreground transition-smooth"
             variant="outline"
           >
             <span className="text-xs mb-1">Fora</span>
-            <span className="text-lg font-bold">{match.awayOdds}</span>
+            <span className="text-lg font-bold">{getOdds("AWAY")}</span>
           </Button>
         </div>
       )}
@@ -151,7 +190,7 @@ const MatchCard = ({ match, onBet, userBalance }: MatchCardProps) => {
               <div className="text-sm text-center p-2 bg-primary/10 rounded">
                 <span className="text-muted-foreground">Retorno potencial: </span>
                 <span className="font-bold text-primary">
-                  R$ {(parseFloat(betAmount) * parseFloat(getOddsForBet())).toFixed(2)}
+                  R$ {(parseFloat(betAmount) * getOddsForBet()).toFixed(2)}
                 </span>
               </div>
             )}
